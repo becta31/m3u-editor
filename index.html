@@ -1,0 +1,637 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>M3U/M3U8 Playlist Editor</title>
+  <style>
+    :root{
+      --bg:#0b1020; --card:#121a33; --text:#e8eeff; --muted:#94a3c9; --line:rgba(255,255,255,.10);
+      --accent:#6ea8fe; --danger:#ff6b6b; --ok:#55efc4;
+    }
+    *{box-sizing:border-box;font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial}
+    body{margin:0;background:linear-gradient(180deg,#070a14,var(--bg));color:var(--text)}
+    header{position:sticky;top:0;z-index:10;background:rgba(11,16,32,.88);backdrop-filter:blur(10px);
+      border-bottom:1px solid var(--line);padding:14px 16px}
+    h1{margin:0;font-size:18px}
+    .wrap{max-width:1200px;margin:0 auto;padding:16px}
+    .grid{display:grid;grid-template-columns:1fr;gap:12px}
+    @media (min-width: 980px){ .grid{grid-template-columns: 430px 1fr;} }
+
+    .card{background:rgba(18,26,51,.93);border:1px solid var(--line);border-radius:14px;padding:14px}
+    .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+    .row > *{flex: 0 0 auto}
+    label{font-size:12px;color:var(--muted);display:block;margin-bottom:6px}
+    input, textarea, select{
+      width:100%; padding:10px 10px;border-radius:10px;border:1px solid var(--line);
+      background:rgba(0,0,0,.18); color:var(--text); outline:none;
+    }
+    textarea{min-height:78px;resize:vertical}
+    .btn{
+      border:1px solid var(--line); background:rgba(0,0,0,.18); color:var(--text);
+      padding:10px 12px; border-radius:12px; cursor:pointer;
+    }
+    .btn:hover{border-color:rgba(255,255,255,.2)}
+    .btn.primary{background:rgba(110,168,254,.18); border-color:rgba(110,168,254,.35)}
+    .btn.danger{background:rgba(255,107,107,.12); border-color:rgba(255,107,107,.35)}
+    .btn.ok{background:rgba(85,239,196,.12); border-color:rgba(85,239,196,.35)}
+    .pill{font-size:12px;color:var(--muted);padding:4px 8px;border:1px solid var(--line);border-radius:999px}
+    .hint{font-size:12px;color:var(--muted);line-height:1.35}
+    .sep{height:1px;background:var(--line);margin:12px 0}
+
+    /* list */
+    .listHeader{display:flex;gap:10px;align-items:center;justify-content:space-between;margin-bottom:10px}
+    .list{border:1px solid var(--line);border-radius:14px;overflow:hidden}
+    .item{
+      display:grid; grid-template-columns: 28px 1fr 120px 36px;
+      gap:10px; align-items:center;
+      padding:10px 10px; border-top:1px solid var(--line); background:rgba(0,0,0,.10);
+    }
+    .item:first-child{border-top:none}
+    .item:hover{background:rgba(255,255,255,.04)}
+    .drag{cursor:grab;opacity:.9; user-select:none}
+    .title{font-weight:600}
+    .sub{font-size:12px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .actions{display:flex;justify-content:flex-end}
+    .iconBtn{
+      width:34px;height:34px;border-radius:10px;border:1px solid var(--line);
+      background:rgba(0,0,0,.18); color:var(--text); cursor:pointer;
+      display:grid;place-items:center;
+    }
+    .iconBtn:hover{border-color:rgba(255,255,255,.2)}
+    .selected{outline:2px solid rgba(110,168,254,.35); background:rgba(110,168,254,.06)}
+    .dropzone{
+      border:1px dashed rgba(255,255,255,.25); border-radius:14px; padding:14px;
+      background:rgba(0,0,0,.14);
+    }
+    .dropzone.dragover{border-color:rgba(110,168,254,.6); background:rgba(110,168,254,.08)}
+    .small{font-size:12px;color:var(--muted)}
+    .two{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+    .three{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px}
+  </style>
+</head>
+<body>
+<header>
+  <div class="row" style="justify-content:space-between">
+    <h1>M3U / M3U8 Playlist Editor (в браузере)</h1>
+    <span class="pill" id="countPill">0 записей</span>
+  </div>
+</header>
+
+<div class="wrap">
+  <div class="grid">
+
+    <!-- LEFT: Controls + Editor -->
+    <div class="card">
+      <div class="row">
+        <input id="fileInput" type="file" accept=".m3u,.m3u8,text/plain" />
+        <button class="btn primary" id="btnNew">Новый</button>
+      </div>
+
+      <div class="sep"></div>
+
+      <div id="dropzone" class="dropzone">
+        <div class="hint"><b>Перетащи сюда файл</b> .m3u/.m3u8 или выбери сверху.</div>
+        <div class="small" id="fileInfo" style="margin-top:6px">Файл не загружен</div>
+      </div>
+
+      <div class="sep"></div>
+
+      <div class="row">
+        <button class="btn ok" id="btnAdd">+ Добавить запись</button>
+        <button class="btn danger" id="btnDelete" disabled>Удалить выбранное</button>
+      </div>
+
+      <div class="sep"></div>
+
+      <div class="two">
+        <div>
+          <label>Поиск (название / группа / URL)</label>
+          <input id="search" placeholder="например: sports, UHD, http..." />
+        </div>
+        <div>
+          <label>Фильтр по группе</label>
+          <select id="groupFilter">
+            <option value="">Все группы</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="sep"></div>
+
+      <div class="hint" style="margin-bottom:10px"><b>Редактор выбранной записи</b></div>
+
+      <div class="three">
+        <div>
+          <label>Название (display name)</label>
+          <input id="fName" placeholder="Название канала/трека" />
+        </div>
+        <div>
+          <label>Группа (group-title)</label>
+          <input id="fGroup" placeholder="Например: Sports" />
+        </div>
+        <div>
+          <label>Длительность</label>
+          <input id="fDur" placeholder="-1 / 0 / 123" />
+        </div>
+      </div>
+
+      <div class="three" style="margin-top:10px">
+        <div>
+          <label>tvg-id</label>
+          <input id="fTvgId" placeholder="опционально" />
+        </div>
+        <div>
+          <label>tvg-name</label>
+          <input id="fTvgName" placeholder="опционально" />
+        </div>
+        <div>
+          <label>tvg-logo</label>
+          <input id="fTvgLogo" placeholder="URL логотипа" />
+        </div>
+      </div>
+
+      <div style="margin-top:10px">
+        <label>URL</label>
+        <textarea id="fUrl" placeholder="http(s)://..."></textarea>
+      </div>
+
+      <div class="row" style="margin-top:10px">
+        <button class="btn primary" id="btnApply" disabled>Применить</button>
+        <button class="btn" id="btnRevert" disabled>Откатить</button>
+      </div>
+
+      <div class="sep"></div>
+
+      <div class="row">
+        <button class="btn primary" id="btnSave" disabled>Скачать .m3u8</button>
+        <button class="btn" id="btnSaveAsJson" disabled>Экспорт JSON</button>
+        <button class="btn" id="btnLoadJson">Импорт JSON</button>
+        <input id="jsonInput" type="file" accept=".json,application/json" style="display:none"/>
+      </div>
+
+      <div class="sep"></div>
+      <div class="hint">
+        Советы: сортировка — просто перетаскивай “≡” слева. Можно редактировать поля и жать “Применить”.
+      </div>
+    </div>
+
+    <!-- RIGHT: List -->
+    <div class="card">
+      <div class="listHeader">
+        <div class="hint"><b>Список</b> (клик — выбрать)</div>
+        <div class="row">
+          <button class="btn" id="btnSortName">Сортировать A→Z</button>
+          <button class="btn" id="btnSortGroup">По группе</button>
+        </div>
+      </div>
+
+      <div class="list" id="list"></div>
+
+      <div class="hint" style="margin-top:10px" id="status"></div>
+    </div>
+
+  </div>
+</div>
+
+<script>
+(() => {
+  /** @type {Array<{
+   *  id:string, name:string, url:string, dur:string,
+   *  attrs: Record<string,string>, rawExtinf?:string
+   * }>} */
+  let entries = [];
+  let selectedId = null;
+  let loadedFileName = null;
+  let sortMode = null;
+
+  const $ = (id) => document.getElementById(id);
+
+  const els = {
+    fileInput: $("fileInput"),
+    dropzone: $("dropzone"),
+    fileInfo: $("fileInfo"),
+    list: $("list"),
+    status: $("status"),
+    countPill: $("countPill"),
+
+    search: $("search"),
+    groupFilter: $("groupFilter"),
+
+    btnNew: $("btnNew"),
+    btnAdd: $("btnAdd"),
+    btnDelete: $("btnDelete"),
+    btnApply: $("btnApply"),
+    btnRevert: $("btnRevert"),
+    btnSave: $("btnSave"),
+    btnSortName: $("btnSortName"),
+    btnSortGroup: $("btnSortGroup"),
+    btnSaveAsJson: $("btnSaveAsJson"),
+    btnLoadJson: $("btnLoadJson"),
+    jsonInput: $("jsonInput"),
+
+    fName: $("fName"),
+    fGroup: $("fGroup"),
+    fDur: $("fDur"),
+    fTvgId: $("fTvgId"),
+    fTvgName: $("fTvgName"),
+    fTvgLogo: $("fTvgLogo"),
+    fUrl: $("fUrl"),
+  };
+
+  function uid(){ return Math.random().toString(16).slice(2) + Date.now().toString(16); }
+
+  function setStatus(msg){ els.status.textContent = msg || ""; }
+
+  function updateCount(){
+    els.countPill.textContent = `${entries.length} записей`;
+    const can = entries.length > 0;
+    els.btnSave.disabled = !can;
+    els.btnSaveAsJson.disabled = !can;
+  }
+
+  function parseExtinfAttrs(extinfLine){
+    // Example: #EXTINF:-1 tvg-id="..." group-title="Sports",Channel Name
+    const attrs = {};
+    const preComma = extinfLine.split(",")[0] || "";
+    const parts = preComma.replace(/^#EXTINF:/i, "");
+    // parts begins with duration then attributes
+    // Grab key="value"
+    const attrRe = /([\w-]+)\s*=\s*"([^"]*)"/g;
+    let m;
+    while((m = attrRe.exec(parts)) !== null){
+      attrs[m[1]] = m[2];
+    }
+    return attrs;
+  }
+
+  function parseExtinfDur(extinfLine){
+    const m = extinfLine.match(/^#EXTINF:\s*([-\d]+)/i);
+    return m ? m[1] : "-1";
+  }
+
+  function parseExtinfName(extinfLine){
+    const idx = extinfLine.indexOf(",");
+    if(idx === -1) return "";
+    return extinfLine.slice(idx+1).trim();
+  }
+
+  function parseM3U(text){
+    const lines = text.replace(/\r\n/g, "\n").replace(/\r/g, "\n").split("\n");
+    const out = [];
+    let i = 0;
+    while(i < lines.length){
+      const line = lines[i].trim();
+      if(!line){ i++; continue; }
+
+      if(line.startsWith("#EXTINF")){
+        const extinf = line;
+        const dur = parseExtinfDur(extinf);
+        const attrs = parseExtinfAttrs(extinf);
+        const name = parseExtinfName(extinf) || (attrs["tvg-name"] || "");
+        // next non-empty line is URL
+        i++;
+        while(i < lines.length && !lines[i].trim()) i++;
+        const url = i < lines.length ? lines[i].trim() : "";
+        out.push({ id: uid(), name, url, dur, attrs, rawExtinf: extinf });
+        i++;
+        continue;
+      }
+
+      // If plain URL without EXTINF: treat as name=url
+      if(!line.startsWith("#")){
+        out.push({ id: uid(), name: line, url: line, dur: "-1", attrs: {} });
+        i++;
+        continue;
+      }
+
+      i++;
+    }
+    return out;
+  }
+
+  function escapeAttr(v){
+    return String(v ?? "").replaceAll('"', '\\"');
+  }
+
+  function toM3U8(list){
+    const lines = ["#EXTM3U"];
+    for(const e of list){
+      const attrs = e.attrs || {};
+      // keep group-title consistent with field
+      if(e._group != null) attrs["group-title"] = e._group;
+      const dur = (e.dur ?? "-1").toString().trim() || "-1";
+      let attrStr = "";
+      const keys = Object.keys(attrs);
+      for(const k of keys){
+        if(attrs[k] === undefined || attrs[k] === null || attrs[k] === "") continue;
+        attrStr += ` ${k}="${escapeAttr(attrs[k])}"`;
+      }
+      const name = (e.name ?? "").toString().trim();
+      lines.push(`#EXTINF:${dur}${attrStr},${name}`);
+      lines.push((e.url ?? "").toString().trim());
+    }
+    return lines.join("\n") + "\n";
+  }
+
+  function downloadText(filename, text){
+    const blob = new Blob([text], {type:"application/x-mpegURL;charset=utf-8"});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = filename;
+    document.body.appendChild(a); a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  }
+
+  function filteredEntries(){
+    const q = els.search.value.trim().toLowerCase();
+    const g = els.groupFilter.value;
+    return entries.filter(e => {
+      const group = (e.attrs?.["group-title"] || "").trim();
+      const hay = `${e.name}\n${group}\n${e.url}`.toLowerCase();
+      if(g && group !== g) return false;
+      if(q && !hay.includes(q)) return false;
+      return true;
+    });
+  }
+
+  function rebuildGroupFilter(){
+    const current = els.groupFilter.value;
+    const groups = Array.from(new Set(entries.map(e => (e.attrs?.["group-title"] || "").trim()).filter(Boolean))).sort((a,b)=>a.localeCompare(b));
+    els.groupFilter.innerHTML = `<option value="">Все группы</option>` + groups.map(g=>`<option value="${g}">${g}</option>`).join("");
+    if(groups.includes(current)) els.groupFilter.value = current;
+  }
+
+  function render(){
+    rebuildGroupFilter();
+    updateCount();
+
+    const view = filteredEntries();
+    els.list.innerHTML = "";
+    if(view.length === 0){
+      els.list.innerHTML = `<div style="padding:12px" class="hint">Ничего не найдено.</div>`;
+      setStatus("");
+      return;
+    }
+
+    for(const e of view){
+      const group = (e.attrs?.["group-title"] || "").trim();
+      const urlShort = (e.url || "").replace(/^https?:\/\//,"").slice(0, 48);
+      const row = document.createElement("div");
+      row.className = "item" + (e.id === selectedId ? " selected" : "");
+      row.draggable = true;
+      row.dataset.id = e.id;
+
+      row.innerHTML = `
+        <div class="drag" title="Перетащи для сортировки">≡</div>
+        <div>
+          <div class="title">${escapeHtml(e.name || "(без названия)")}</div>
+          <div class="sub">${escapeHtml(group || "Без группы")} • ${escapeHtml(urlShort || "")}</div>
+        </div>
+        <div class="sub" title="Длительность">${escapeHtml(String(e.dur ?? "-1"))}</div>
+        <div class="actions">
+          <button class="iconBtn" title="Выбрать">✎</button>
+        </div>
+      `;
+
+      row.addEventListener("click", () => selectById(e.id));
+
+      // drag & drop reorder (within *full* entries order by id)
+      row.addEventListener("dragstart", (ev) => {
+        ev.dataTransfer.setData("text/plain", e.id);
+        ev.dataTransfer.effectAllowed = "move";
+      });
+      row.addEventListener("dragover", (ev) => {
+        ev.preventDefault();
+        ev.dataTransfer.dropEffect = "move";
+      });
+      row.addEventListener("drop", (ev) => {
+        ev.preventDefault();
+        const fromId = ev.dataTransfer.getData("text/plain");
+        const toId = e.id;
+        if(!fromId || fromId === toId) return;
+        moveEntry(fromId, toId);
+      });
+
+      els.list.appendChild(row);
+    }
+
+    setStatus(`Показано: ${view.length} / ${entries.length}`);
+  }
+
+  function escapeHtml(s){
+    return String(s ?? "")
+      .replaceAll("&","&amp;")
+      .replaceAll("<","&lt;")
+      .replaceAll(">","&gt;")
+      .replaceAll('"',"&quot;");
+  }
+
+  function selectById(id){
+    selectedId = id;
+    const e = entries.find(x => x.id === id);
+    if(!e){
+      selectedId = null;
+      clearEditor();
+      render();
+      return;
+    }
+    // bind fields
+    els.fName.value = e.name ?? "";
+    els.fUrl.value = e.url ?? "";
+    els.fDur.value = e.dur ?? "-1";
+    els.fGroup.value = e.attrs?.["group-title"] ?? "";
+    els.fTvgId.value = e.attrs?.["tvg-id"] ?? "";
+    els.fTvgName.value = e.attrs?.["tvg-name"] ?? "";
+    els.fTvgLogo.value = e.attrs?.["tvg-logo"] ?? "";
+
+    els.btnDelete.disabled = false;
+    els.btnApply.disabled = false;
+    els.btnRevert.disabled = false;
+    render();
+  }
+
+  function clearEditor(){
+    selectedId = null;
+    els.fName.value = "";
+    els.fUrl.value = "";
+    els.fDur.value = "-1";
+    els.fGroup.value = "";
+    els.fTvgId.value = "";
+    els.fTvgName.value = "";
+    els.fTvgLogo.value = "";
+    els.btnDelete.disabled = true;
+    els.btnApply.disabled = true;
+    els.btnRevert.disabled = true;
+  }
+
+  function applyEditor(){
+    const e = entries.find(x => x.id === selectedId);
+    if(!e) return;
+    e.name = els.fName.value.trim();
+    e.url = els.fUrl.value.trim();
+    e.dur = (els.fDur.value.trim() || "-1");
+    e.attrs = e.attrs || {};
+    const group = els.fGroup.value.trim();
+    if(group) e.attrs["group-title"] = group; else delete e.attrs["group-title"];
+    const tvgId = els.fTvgId.value.trim();
+    if(tvgId) e.attrs["tvg-id"] = tvgId; else delete e.attrs["tvg-id"];
+    const tvgName = els.fTvgName.value.trim();
+    if(tvgName) e.attrs["tvg-name"] = tvgName; else delete e.attrs["tvg-name"];
+    const tvgLogo = els.fTvgLogo.value.trim();
+    if(tvgLogo) e.attrs["tvg-logo"] = tvgLogo; else delete e.attrs["tvg-logo"];
+
+    render();
+  }
+
+  function revertEditor(){
+    if(!selectedId) return;
+    selectById(selectedId);
+  }
+
+  function addEntry(){
+    const e = { id: uid(), name:"", url:"", dur:"-1", attrs:{} };
+    entries.unshift(e);
+    selectById(e.id);
+    render();
+  }
+
+  function deleteSelected(){
+    if(!selectedId) return;
+    const idx = entries.findIndex(x => x.id === selectedId);
+    if(idx >= 0) entries.splice(idx, 1);
+    clearEditor();
+    render();
+  }
+
+  function moveEntry(fromId, toId){
+    const fromIdx = entries.findIndex(x => x.id === fromId);
+    const toIdx = entries.findIndex(x => x.id === toId);
+    if(fromIdx < 0 || toIdx < 0) return;
+    const [moved] = entries.splice(fromIdx, 1);
+    const insertAt = (fromIdx < toIdx) ? toIdx : toIdx;
+    entries.splice(insertAt, 0, moved);
+    render();
+  }
+
+  function sortByName(){
+    entries.sort((a,b)=> (a.name||"").localeCompare(b.name||"", undefined, {sensitivity:"base"}));
+    sortMode = "name";
+    render();
+  }
+
+  function sortByGroup(){
+    entries.sort((a,b)=>{
+      const ga = (a.attrs?.["group-title"]||"").toLowerCase();
+      const gb = (b.attrs?.["group-title"]||"").toLowerCase();
+      if(ga !== gb) return ga.localeCompare(gb);
+      return (a.name||"").localeCompare(b.name||"", undefined, {sensitivity:"base"});
+    });
+    sortMode = "group";
+    render();
+  }
+
+  async function loadFile(file){
+    const text = await file.text();
+    entries = parseM3U(text);
+    loadedFileName = file.name || "playlist.m3u8";
+    els.fileInfo.textContent = `Загружено: ${loadedFileName} • ${entries.length} записей`;
+    clearEditor();
+    render();
+  }
+
+  function newPlaylist(){
+    entries = [];
+    loadedFileName = "playlist.m3u8";
+    els.fileInfo.textContent = "Новый плейлист";
+    clearEditor();
+    render();
+  }
+
+  function saveM3U(){
+    const name = (loadedFileName && loadedFileName.toLowerCase().endsWith(".m3u")) ? loadedFileName + "8" : (loadedFileName || "playlist.m3u8");
+    const text = toM3U8(entries);
+    downloadText(name.replace(/\.m3u$/i, ".m3u8"), text);
+  }
+
+  function exportJson(){
+    const payload = {
+      version: 1,
+      exportedAt: new Date().toISOString(),
+      sourceFile: loadedFileName,
+      entries
+    };
+    downloadText((loadedFileName || "playlist").replace(/\.(m3u8|m3u)$/i,"") + ".json", JSON.stringify(payload, null, 2));
+  }
+
+  async function importJsonFile(file){
+    const text = await file.text();
+    const obj = JSON.parse(text);
+    if(!obj || !Array.isArray(obj.entries)) throw new Error("JSON не содержит entries[]");
+    // normalize ids
+    entries = obj.entries.map(e => ({
+      id: e.id || uid(),
+      name: e.name || "",
+      url: e.url || "",
+      dur: (e.dur ?? "-1").toString(),
+      attrs: e.attrs || {}
+    }));
+    loadedFileName = (obj.sourceFile || "playlist.m3u8");
+    els.fileInfo.textContent = `Импорт JSON: ${file.name} • ${entries.length} записей`;
+    clearEditor();
+    render();
+  }
+
+  // events
+  els.fileInput.addEventListener("change", async (e) => {
+    const f = e.target.files && e.target.files[0];
+    if(f) await loadFile(f);
+    els.fileInput.value = "";
+  });
+
+  // drag file onto dropzone
+  ["dragenter","dragover"].forEach(evt => {
+    els.dropzone.addEventListener(evt, (ev) => { ev.preventDefault(); els.dropzone.classList.add("dragover"); });
+  });
+  ["dragleave","drop"].forEach(evt => {
+    els.dropzone.addEventListener(evt, (ev) => { ev.preventDefault(); els.dropzone.classList.remove("dragover"); });
+  });
+  els.dropzone.addEventListener("drop", async (ev) => {
+    const f = ev.dataTransfer.files && ev.dataTransfer.files[0];
+    if(f) await loadFile(f);
+  });
+
+  els.btnNew.addEventListener("click", newPlaylist);
+  els.btnAdd.addEventListener("click", addEntry);
+  els.btnDelete.addEventListener("click", deleteSelected);
+  els.btnApply.addEventListener("click", applyEditor);
+  els.btnRevert.addEventListener("click", revertEditor);
+  els.btnSave.addEventListener("click", saveM3U);
+  els.btnSortName.addEventListener("click", sortByName);
+  els.btnSortGroup.addEventListener("click", sortByGroup);
+  els.search.addEventListener("input", render);
+  els.groupFilter.addEventListener("change", render);
+
+  // editor autosave on Ctrl+Enter
+  document.addEventListener("keydown", (ev) => {
+    if(ev.ctrlKey && ev.key === "Enter"){
+      if(!els.btnApply.disabled) applyEditor();
+    }
+  });
+
+  els.btnLoadJson.addEventListener("click", () => els.jsonInput.click());
+  els.jsonInput.addEventListener("change", async (e) => {
+    const f = e.target.files && e.target.files[0];
+    if(!f) return;
+    try { await importJsonFile(f); }
+    catch(err){ alert("Ошибка импорта JSON: " + err.message); }
+    els.jsonInput.value = "";
+  });
+
+  // Initial state
+  newPlaylist();
+})();
+</script>
+</body>
+</html>
