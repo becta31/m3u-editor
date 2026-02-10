@@ -85,6 +85,53 @@
     .bar .row{justify-content:space-between}
     .bar .btn{padding:10px 10px;border-radius:12px}
     .count{font-size:12px;color:var(--muted)}
+
+    /* --- Layout: groups sidebar + list --- */
+    .layout{
+      display:grid;
+      grid-template-columns: 260px 1fr;
+      gap:12px;
+      align-items:start;
+    }
+    @media (max-width: 860px){
+      .layout{ grid-template-columns: 1fr; }
+    }
+
+    .sidebar{
+      position:sticky;
+      top:64px;
+      max-height: calc(100vh - 80px);
+      overflow:auto;
+    }
+    @media (max-width: 860px){
+      .sidebar{ position:static; max-height:none; display:none; }
+      .sidebar.open{ display:block; }
+    }
+
+    .groupList{ display:flex; flex-direction:column; gap:8px; }
+    .groupItem{
+      display:flex; align-items:center; justify-content:space-between;
+      padding:10px 12px;
+      border:1px solid var(--line);
+      border-radius:12px;
+      background:rgba(0,0,0,.10);
+      cursor:pointer;
+    }
+    .groupItem.active{
+      border-color: rgba(110,168,254,.55);
+      background: rgba(110,168,254,.10);
+    }
+    .groupName{ font-size:14px; font-weight:600; }
+    .groupCount{
+      font-size:12px; color:var(--muted);
+      padding:2px 8px; border:1px solid var(--line);
+      border-radius:999px;
+    }
+
+    .sideToggleRow{ display:none; }
+    @media (max-width: 860px){
+      .sideToggleRow{ display:flex; gap:10px; align-items:center; }
+    }
   </style>
 </head>
 <body>
@@ -133,14 +180,38 @@
 
   <div style="height:12px"></div>
 
-  <div class="card">
-    <div class="row" style="justify-content:space-between;align-items:flex-end">
-      <div class="hint"><b>Список</b> (тапни “Редактировать”)</div>
-      <div class="hint" id="viewInfo"></div>
+  <!-- layout: sidebar + list -->
+  <div class="layout">
+
+    <!-- LEFT: groups -->
+    <div class="card sidebar" id="sidebar">
+      <div class="row" style="justify-content:space-between;align-items:center">
+        <div class="hint"><b>Группы</b></div>
+        <span class="pill" id="groupsInfo">0</span>
+      </div>
+      <div style="height:10px"></div>
+      <div id="groupList" class="groupList"></div>
+      <div class="hint" style="margin-top:10px">
+        Тап по группе = фильтр. “Все” покажет весь плейлист.
+      </div>
     </div>
-    <div style="height:8px"></div>
-    <div id="list"></div>
-    <div class="hint" id="status"></div>
+
+    <!-- RIGHT: list -->
+    <div class="card">
+      <div class="row" style="justify-content:space-between;align-items:flex-end">
+        <div class="hint"><b>Список</b> (тапни “Редактировать”)</div>
+
+        <div class="sideToggleRow">
+          <button class="btn" id="btnToggleGroups">Группы</button>
+        </div>
+
+        <div class="hint" id="viewInfo"></div>
+      </div>
+      <div style="height:8px"></div>
+      <div id="list"></div>
+      <div class="hint" id="status"></div>
+    </div>
+
   </div>
 
   <div style="height:12px"></div>
@@ -326,6 +397,12 @@
     btnSelectAll: $("btnSelectAll"),
     btnClearSel: $("btnClearSel"),
     btnBulkDelete: $("btnBulkDelete"),
+
+    // sidebar groups
+    sidebar: $("sidebar"),
+    groupList: $("groupList"),
+    groupsInfo: $("groupsInfo"),
+    btnToggleGroups: $("btnToggleGroups"),
   };
 
   function uid(){ return Math.random().toString(16).slice(2) + Date.now().toString(16); }
@@ -348,107 +425,100 @@
     return idx === -1 ? "" : extinfLine.slice(idx+1).trim();
   }
 
+  // FIXED parser: supports #EXTGRP between EXTINF and URL
   function parseM3U(text){
-  const lines = text.replace(/\r\n/g,"\n").replace(/\r/g,"\n").split("\n");
-  const out = [];
-  let i = 0;
+    const lines = text.replace(/\r\n/g,"\n").replace(/\r/g,"\n").split("\n");
+    const out = [];
+    let i = 0;
 
-  const isSkippableMetaBetween = (s) => (
-    s.startsWith("#EXTVLCOPT") ||
-    s.startsWith("#KODIPROP") ||
-    s.startsWith("#EXT-X-") ||
-    s.startsWith("#EXTHTTP") ||
-    s.startsWith("#EXTIMG") ||
-    s.startsWith("#EXTALB") ||
-    s.startsWith("#EXTART")
-  );
+    const isSkippableMetaBetween = (s) => (
+      s.startsWith("#EXTVLCOPT") ||
+      s.startsWith("#KODIPROP") ||
+      s.startsWith("#EXT-X-") ||
+      s.startsWith("#EXTHTTP") ||
+      s.startsWith("#EXTIMG") ||
+      s.startsWith("#EXTALB") ||
+      s.startsWith("#EXTART")
+    );
 
-  while(i < lines.length){
-    let line = (lines[i] ?? "").trim();
-    if(!line){ i++; continue; }
+    while(i < lines.length){
+      let line = (lines[i] ?? "").trim();
+      if(!line){ i++; continue; }
 
-    if(line.startsWith("#EXTM3U")) { i++; continue; }
+      if(line.startsWith("#EXTM3U")) { i++; continue; }
+      if(line.startsWith("#EXTGRP")) { i++; continue; }
 
-    // одиночные EXTGRP пропускаем (группа должна идти после EXTINF)
-    if(line.startsWith("#EXTGRP")) { i++; continue; }
+      if(line.startsWith("#EXTINF")){
+        const extinf = line;
+        const dur = (extinf.match(/^#EXTINF:\s*([-\d]+)/i)?.[1]) || "-1";
+        const attrs = parseExtinfAttrs(extinf);
+        const name = parseExtinfName(extinf) || (attrs["tvg-name"] || "");
 
-    if(line.startsWith("#EXTINF")){
-      const extinf = line;
-      const dur = (extinf.match(/^#EXTINF:\s*([-\d]+)/i)?.[1]) || "-1";
-      const attrs = parseExtinfAttrs(extinf);
-      const name = parseExtinfName(extinf) || (attrs["tvg-name"] || "");
+        i++;
 
-      i++;
+        while(i < lines.length && !(lines[i] ?? "").trim()) i++;
 
-      // пропускаем пустые строки
-      while(i < lines.length && !(lines[i] ?? "").trim()) i++;
-
-      // если следующая строка — EXTGRP, забираем группу и идём дальше
-      if(i < lines.length){
-        const maybeGrp = (lines[i] ?? "").trim();
-        if(maybeGrp.startsWith("#EXTGRP")){
-          const grp = maybeGrp.split(":").slice(1).join(":").trim();
-          if(grp) attrs["group-title"] = grp;
-          i++;
-          while(i < lines.length && !(lines[i] ?? "").trim()) i++;
+        if(i < lines.length){
+          const maybeGrp = (lines[i] ?? "").trim();
+          if(maybeGrp.startsWith("#EXTGRP")){
+            const grp = maybeGrp.split(":").slice(1).join(":").trim();
+            if(grp) attrs["group-title"] = grp;
+            i++;
+            while(i < lines.length && !(lines[i] ?? "").trim()) i++;
+          }
         }
+
+        while(i < lines.length){
+          const maybe = (lines[i] ?? "").trim();
+          if(!maybe){ i++; continue; }
+          if(maybe.startsWith("#") && isSkippableMetaBetween(maybe)) { i++; continue; }
+          break;
+        }
+
+        const urlLine = i < lines.length ? (lines[i] ?? "").trim() : "";
+        const url = (urlLine && !urlLine.startsWith("#")) ? urlLine : "";
+
+        out.push({ id: uid(), name, url, dur, attrs });
+        i++;
+        continue;
       }
 
-      // пропускаем служебные #... строки между EXTINF и URL
-      while(i < lines.length){
-        const maybe = (lines[i] ?? "").trim();
-        if(!maybe){ i++; continue; }
-        if(maybe.startsWith("#") && isSkippableMetaBetween(maybe)) { i++; continue; }
-        break;
+      if(!line.startsWith("#")){
+        out.push({ id: uid(), name: line, url: line, dur:"-1", attrs:{} });
+        i++;
+        continue;
       }
 
-      const urlLine = i < lines.length ? (lines[i] ?? "").trim() : "";
-      const url = (urlLine && !urlLine.startsWith("#")) ? urlLine : "";
-
-      out.push({ id: uid(), name, url, dur, attrs });
       i++;
-      continue;
     }
 
-    // голая ссылка без EXTINF (оставляем как есть)
-    if(!line.startsWith("#")){
-      out.push({ id: uid(), name: line, url: line, dur:"-1", attrs:{} });
-      i++;
-      continue;
-    }
-
-    // прочие #... строки пропускаем
-    i++;
+    return out;
   }
 
-  return out;
-}
+  // FIXED exporter: never outputs entries without URL, no #EXTGRP, standard -1
   function toM3U8(list){
-  const lines = ["#EXTM3U"];
+    const lines = ["#EXTM3U"];
+    for(const e of list){
+      const url = (e.url ?? "").toString().trim();
+      if(!url || url.startsWith("#")) continue;
 
-  for(const e of list){
-    const url = (e.url ?? "").toString().trim();
+      const attrs = e.attrs || {};
+      const dur = "-1";
 
-    // КРИТИЧНО: не сохраняем битые записи без ссылки
-    if(!url || url.startsWith("#")) continue;
+      let attrStr = "";
+      for(const k of Object.keys(attrs)){
+        const val = attrs[k];
+        if(val === undefined || val === null || val === "") continue;
+        attrStr += ` ${k}="${escapeAttr(val)}"`;
+      }
 
-    const attrs = e.attrs || {};
-    const dur = "-1"; // стандарт для IPTV/OTT
-
-    let attrStr = "";
-    for(const k of Object.keys(attrs)){
-      const val = attrs[k];
-      if(val === undefined || val === null || val === "") continue;
-      attrStr += ` ${k}="${escapeAttr(val)}"`;
+      const name = (e.name ?? "").toString().trim();
+      lines.push(`#EXTINF:${dur}${attrStr},${name}`);
+      lines.push(url);
     }
-
-    const name = (e.name ?? "").toString().trim();
-    lines.push(`#EXTINF:${dur}${attrStr},${name}`);
-    lines.push(url);
+    return lines.join("\n") + "\n";
   }
 
-  return lines.join("\n") + "\n";
-}
   function downloadText(filename, text){
     const blob = new Blob([text], {type:"application/x-mpegURL;charset=utf-8"});
     const url = URL.createObjectURL(blob);
@@ -468,15 +538,83 @@
   function rebuildGroupFilter(){
     const current = els.groupFilter.value;
     const groups = Array.from(new Set(entries.map(e => (e.attrs?.["group-title"]||"").trim()).filter(Boolean)))
-      .sort((a,b)=>a.localeCompare(b));
-    els.groupFilter.innerHTML = `<option value="">Все группы</option>` + groups.map(g=>`<option value="${escapeHtml(g)}">${escapeHtml(g)}</option>`).join("");
-    // restore if still exists (note: options are HTML-escaped; value is raw)
+      .sort((a,b)=>a.localeCompare(b, "ru"));
+
+    const hasNoGroup = entries.some(e => !((e.attrs?.["group-title"]||"").trim()));
+    const noGroupOpt = hasNoGroup ? `<option value="__NO_GROUP__">Без группы</option>` : "";
+
+    els.groupFilter.innerHTML =
+      `<option value="">Все группы</option>` +
+      noGroupOpt +
+      groups.map(g=>`<option value="${escapeHtml(g)}">${escapeHtml(g)}</option>`).join("");
+
+    if(current === "__NO_GROUP__" && hasNoGroup){
+      els.groupFilter.value = "__NO_GROUP__";
+      return;
+    }
     if(groups.includes(current)) els.groupFilter.value = current;
+  }
+
+  function renderGroupSidebar(){
+    const counts = new Map();
+    let noGroup = 0;
+
+    for(const e of entries){
+      const g = (e.attrs?.["group-title"] || "").trim();
+      if(!g) { noGroup++; continue; }
+      counts.set(g, (counts.get(g) || 0) + 1);
+    }
+
+    const groups = [...counts.keys()].sort((a,b)=>a.localeCompare(b, "ru"));
+    const totalGroups = groups.length + (noGroup > 0 ? 1 : 0);
+    els.groupsInfo.textContent = `${totalGroups}`;
+
+    const current = els.groupFilter.value;
+    let html = "";
+
+    html += `
+      <div class="groupItem ${current==="" ? "active":""}" data-group="">
+        <div class="groupName">Все</div>
+        <div class="groupCount">${entries.length}</div>
+      </div>
+    `;
+
+    if(noGroup > 0){
+      html += `
+        <div class="groupItem ${current==="__NO_GROUP__" ? "active":""}" data-group="__NO_GROUP__">
+          <div class="groupName">Без группы</div>
+          <div class="groupCount">${noGroup}</div>
+        </div>
+      `;
+    }
+
+    for(const g of groups){
+      const c = counts.get(g);
+      html += `
+        <div class="groupItem ${current===g ? "active":""}" data-group="${escapeHtml(g)}">
+          <div class="groupName">${escapeHtml(g)}</div>
+          <div class="groupCount">${c}</div>
+        </div>
+      `;
+    }
+
+    els.groupList.innerHTML = html;
+
+    els.groupList.querySelectorAll(".groupItem").forEach(item=>{
+      item.addEventListener("click", ()=>{
+        const g = item.getAttribute("data-group") || "";
+        els.groupFilter.value = g;
+
+        if(window.matchMedia("(max-width: 860px)").matches){
+          els.sidebar.classList.remove("open");
+        }
+        render();
+      });
+    });
   }
 
   function qualityRank(name){
     const t = (name||"").toLowerCase();
-    // Higher rank = better. We'll map to 4..0
     const has = (re) => re.test(t);
     if(has(/\b(uhd|4k)\b/)) return 4;
     if(has(/\b(fhd|1080p|1080)\b/)) return 3;
@@ -486,13 +624,11 @@
   }
 
   function matchesCleanCriteria(e){
-    // If no criteria selected, pass
     const name = (e.name||"").toLowerCase();
     const group = ((e.attrs?.["group-title"]||"").trim());
     const tvgId = ((e.attrs?.["tvg-id"]||"").trim());
     const logo = ((e.attrs?.["tvg-logo"]||"").trim());
 
-    // Quality chips: OR within quality set, AND with other groups of criteria
     if(clean.q.size){
       const r = qualityRank(e.name);
       let ok = false;
@@ -503,12 +639,10 @@
       if(!ok) return false;
     }
 
-    // Field chips: AND across selected
     if(clean.fields.has("noGroup") && group) return false;
     if(clean.fields.has("noTvgId") && tvgId) return false;
     if(clean.fields.has("noLogo")  && logo) return false;
 
-    // Junk chips: OR inside junk set
     if(clean.junk.size){
       let ok = false;
       for(const j of clean.junk){
@@ -527,7 +661,14 @@
     return entries.filter(e=>{
       const group = (e.attrs?.["group-title"]||"").trim();
       const hay = `${e.name}\n${group}\n${e.url}`.toLowerCase();
-      if(g && group !== g) return false;
+
+      if(g){
+        if(g === "__NO_GROUP__"){
+          if(group) return false;
+        } else {
+          if(group !== g) return false;
+        }
+      }
       if(q && !hay.includes(q)) return false;
       return true;
     });
@@ -539,7 +680,6 @@
     if(cleanMode){
       view = view.filter(matchesCleanCriteria);
 
-      // sorting affects view order; also optionally can apply to entries on request (we do view-only)
       if(clean.sort === "quality"){
         view = [...view].sort((a,b)=>{
           const ra = qualityRank(a.name), rb = qualityRank(b.name);
@@ -579,6 +719,7 @@
 
   function render(){
     rebuildGroupFilter();
+    renderGroupSidebar();
     updateCount();
 
     const view = viewEntries();
@@ -625,7 +766,6 @@
         </div>
       `;
 
-      // checkbox toggle
       if(cleanMode){
         const cb = div.querySelector('input[type="checkbox"]');
         cb.addEventListener("click", (ev)=>{
@@ -635,9 +775,7 @@
           syncBar(view);
         });
 
-        // tap on header toggles checkbox (bigger target)
         div.querySelector(".checkWrap").addEventListener("click", (ev)=>{
-          // if click wasn't on button
           if(ev.target?.tagName?.toLowerCase() === "button") return;
           if(ev.target?.tagName?.toLowerCase() === "input") return;
           cb.checked = !cb.checked;
@@ -719,7 +857,6 @@
     if(!selectedId) return;
     const idx = entries.findIndex(x=>x.id===selectedId);
     if(idx>=0) entries.splice(idx,1);
-    // also remove from selectedSet if present
     selectedSet.delete(selectedId);
     clearEditor();
     render();
@@ -772,16 +909,9 @@
   }
 
   function refreshChips(){
-    // quality
-    els.qChips.querySelectorAll(".chip").forEach(ch=>{
-      setChip(ch, clean.q.has(ch.dataset.q));
-    });
-    els.fieldChips.querySelectorAll(".chip").forEach(ch=>{
-      setChip(ch, clean.fields.has(ch.dataset.f));
-    });
-    els.junkChips.querySelectorAll(".chip").forEach(ch=>{
-      setChip(ch, clean.junk.has(ch.dataset.j));
-    });
+    els.qChips.querySelectorAll(".chip").forEach(ch=> setChip(ch, clean.q.has(ch.dataset.q)));
+    els.fieldChips.querySelectorAll(".chip").forEach(ch=> setChip(ch, clean.fields.has(ch.dataset.f)));
+    els.junkChips.querySelectorAll(".chip").forEach(ch=> setChip(ch, clean.junk.has(ch.dataset.j)));
     els.sortMode.value = clean.sort;
   }
 
@@ -820,10 +950,8 @@
     const ids = new Set(selectedSet);
     if(ids.size === 0) return;
 
-    // Confirm with visible count context
     const view = viewEntries();
     const visibleIds = new Set(view.map(e=>e.id));
-    // Safety: delete only those currently visible AND selected
     const toDelete = [...ids].filter(id => visibleIds.has(id));
     if(toDelete.length === 0) {
       alert("Нечего удалять: выбранные элементы не находятся в текущем отобранном списке.");
@@ -833,13 +961,11 @@
     const ok = confirm(`Удалить ${toDelete.length} канал(ов) из текущего отбора?`);
     if(!ok) return;
 
-    // snapshot (simple one-step undo potential)
     lastDeletedSnapshot = entries.map(e => ({...e, attrs: {...(e.attrs||{})}}));
 
     const delSet = new Set(toDelete);
     entries = entries.filter(e => !delSet.has(e.id));
 
-    // clear selections and editor if it was deleted
     for(const id of toDelete) selectedSet.delete(id);
     if(selectedId && delSet.has(selectedId)) clearEditor();
 
@@ -881,7 +1007,6 @@
   els.btnCleanMode.onclick = () => setCleanMode(!cleanMode);
   els.btnCloseSheet.onclick = closeSheet;
 
-  // chips
   els.qChips.addEventListener("click", (ev)=>{
     const chip = ev.target.closest(".chip");
     if(!chip) return;
@@ -907,10 +1032,15 @@
   els.btnApplySort.onclick = applySortFromSheet;
   els.btnClearClean.onclick = clearCleanCriteria;
 
-  // bottom bar actions
   els.btnSelectAll.onclick = selectAllVisible;
   els.btnClearSel.onclick = clearSelection;
   els.btnBulkDelete.onclick = bulkDelete;
+
+  if(els.btnToggleGroups){
+    els.btnToggleGroups.onclick = () => {
+      els.sidebar.classList.toggle("open");
+    };
+  }
 
   // init
   newPlaylist();
