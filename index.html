@@ -322,14 +322,18 @@
   </div>
 </div>
 
-<!-- Bottom bar: bulk actions -->
+<!-- Bottom bar: bulk actions (UPDATED: set group) -->
 <div class="bar" id="bar">
-  <div class="row">
+  <div class="row" style="justify-content:space-between;align-items:center">
     <div>
       <div class="count" id="selInfo">Выбрано: 0</div>
       <div class="count" id="viewCountInfo"></div>
     </div>
-    <div class="row" style="gap:8px">
+
+    <div class="row" style="gap:8px;flex-wrap:wrap;justify-content:flex-end">
+      <input id="bulkGroupName" placeholder="Название группы" style="width:220px;max-width:52vw" />
+      <button class="btn primary" id="btnBulkSetGroup" disabled>В группу</button>
+
       <button class="btn" id="btnSelectAll">Выбрать всё</button>
       <button class="btn" id="btnClearSel">Снять</button>
       <button class="btn danger" id="btnBulkDelete" disabled>Удалить (0)</button>
@@ -346,15 +350,15 @@
   // Clean mode state
   let cleanMode = false;
   const clean = {
-    q: new Set(),       // UHD, FHD, HD, SD
-    fields: new Set(),  // noGroup, noTvgId, noLogo
-    junk: new Set(),    // test, backup, promo
+    q: new Set(),
+    fields: new Set(),
+    junk: new Set(),
     sort: "none"
   };
 
   // Multi-select state (ids of entries)
   const selectedSet = new Set();
-  let lastDeletedSnapshot = null; // simple undo could be added later
+  let lastDeletedSnapshot = null;
 
   const $ = (id) => document.getElementById(id);
   const els = {
@@ -397,6 +401,10 @@
     btnSelectAll: $("btnSelectAll"),
     btnClearSel: $("btnClearSel"),
     btnBulkDelete: $("btnBulkDelete"),
+
+    // NEW: bulk group controls
+    bulkGroupName: $("bulkGroupName"),
+    btnBulkSetGroup: $("btnBulkSetGroup"),
 
     // sidebar groups
     sidebar: $("sidebar"),
@@ -483,6 +491,7 @@
         continue;
       }
 
+      // bare url without EXTINF
       if(!line.startsWith("#")){
         out.push({ id: uid(), name: line, url: line, dur:"-1", attrs:{} });
         i++;
@@ -531,8 +540,7 @@
 
   function updateCount(){
     els.countPill.textContent = `${entries.length} записей`;
-    const can = entries.length > 0;
-    els.btnDownload.disabled = !can;
+    els.btnDownload.disabled = !(entries.length > 0);
   }
 
   function rebuildGroupFilter(){
@@ -715,6 +723,11 @@
     els.viewCountInfo.textContent = `На экране: ${view.length}`;
     els.btnBulkDelete.disabled = sel === 0;
     els.btnBulkDelete.textContent = `Удалить (${sel})`;
+
+    // NEW: enable/disable "В группу"
+    const hasName = (els.bulkGroupName?.value ?? "").trim().length > 0;
+    els.btnBulkSetGroup.disabled = (sel === 0) || !hasName;
+    els.btnBulkSetGroup.textContent = `В группу (${sel})`;
   }
 
   function render(){
@@ -880,6 +893,7 @@
     els.fileInfo.textContent = `Загружено: ${loadedFileName} • ${entries.length} записей`;
     selectedSet.clear();
     clearEditor();
+    els.bulkGroupName.value = "";
     render();
   }
 
@@ -889,6 +903,7 @@
     els.fileInfo.textContent = "Новый плейлист";
     selectedSet.clear();
     clearEditor();
+    els.bulkGroupName.value = "";
     render();
   }
 
@@ -929,6 +944,7 @@
     if(!cleanMode){
       closeSheet();
       selectedSet.clear();
+      els.bulkGroupName.value = "";
     } else {
       openSheet();
     }
@@ -968,6 +984,45 @@
 
     for(const id of toDelete) selectedSet.delete(id);
     if(selectedId && delSet.has(selectedId)) clearEditor();
+
+    render();
+  }
+
+  // NEW: set group for selected (visible) channels
+  function bulkSetGroup(){
+    const groupName = (els.bulkGroupName.value || "").trim();
+    if(!groupName){
+      alert("Впиши название группы.");
+      return;
+    }
+    if(selectedSet.size === 0) return;
+
+    const view = viewEntries();
+    const visibleIds = new Set(view.map(e=>e.id));
+    const toApply = [...selectedSet].filter(id => visibleIds.has(id));
+    if(toApply.length === 0){
+      alert("Выбранные элементы не находятся в текущем отобранном списке.");
+      return;
+    }
+
+    const ok = confirm(`Добавить ${toApply.length} канал(ов) в группу “${groupName}”?`);
+    if(!ok) return;
+
+    const setIds = new Set(toApply);
+    for(const e of entries){
+      if(!setIds.has(e.id)) continue;
+      e.attrs = e.attrs || {};
+      e.attrs["group-title"] = groupName;
+    }
+
+    selectedSet.clear();
+    els.bulkGroupName.value = "";
+
+    // if editor opened, update group field
+    if(selectedId){
+      const cur = entries.find(x => x.id === selectedId);
+      if(cur) els.fGroup.value = cur.attrs?.["group-title"] || "";
+    }
 
     render();
   }
@@ -1035,6 +1090,12 @@
   els.btnSelectAll.onclick = selectAllVisible;
   els.btnClearSel.onclick = clearSelection;
   els.btnBulkDelete.onclick = bulkDelete;
+
+  els.btnBulkSetGroup.onclick = bulkSetGroup;
+  els.bulkGroupName.addEventListener("input", ()=>{
+    const view = viewEntries();
+    syncBar(view);
+  });
 
   if(els.btnToggleGroups){
     els.btnToggleGroups.onclick = () => {
