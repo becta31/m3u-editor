@@ -349,52 +349,106 @@
   }
 
   function parseM3U(text){
-    const lines = text.replace(/\r\n/g,"\n").replace(/\r/g,"\n").split("\n");
-    const out = [];
-    let i = 0;
-    while(i < lines.length){
-      const line = lines[i].trim();
-      if(!line){ i++; continue; }
+  const lines = text.replace(/\r\n/g,"\n").replace(/\r/g,"\n").split("\n");
+  const out = [];
+  let i = 0;
 
-      if(line.startsWith("#EXTINF")){
-        const extinf = line;
-        const dur = (extinf.match(/^#EXTINF:\s*([-\d]+)/i)?.[1]) || "-1";
-        const attrs = parseExtinfAttrs(extinf);
-        const name = parseExtinfName(extinf) || (attrs["tvg-name"] || "");
-        i++;
-        while(i < lines.length && !lines[i].trim()) i++;
-        const url = i < lines.length ? lines[i].trim() : "";
-        out.push({ id: uid(), name, url, dur, attrs });
-        i++;
-        continue;
-      }
+  const isSkippableMetaBetween = (s) => (
+    s.startsWith("#EXTVLCOPT") ||
+    s.startsWith("#KODIPROP") ||
+    s.startsWith("#EXT-X-") ||
+    s.startsWith("#EXTHTTP") ||
+    s.startsWith("#EXTIMG") ||
+    s.startsWith("#EXTALB") ||
+    s.startsWith("#EXTART")
+  );
 
-      if(!line.startsWith("#")){
-        out.push({ id: uid(), name: line, url: line, dur:"-1", attrs:{} });
-      }
+  while(i < lines.length){
+    let line = (lines[i] ?? "").trim();
+    if(!line){ i++; continue; }
+
+    if(line.startsWith("#EXTM3U")) { i++; continue; }
+
+    // одиночные EXTGRP пропускаем (группа должна идти после EXTINF)
+    if(line.startsWith("#EXTGRP")) { i++; continue; }
+
+    if(line.startsWith("#EXTINF")){
+      const extinf = line;
+      const dur = (extinf.match(/^#EXTINF:\s*([-\d]+)/i)?.[1]) || "-1";
+      const attrs = parseExtinfAttrs(extinf);
+      const name = parseExtinfName(extinf) || (attrs["tvg-name"] || "");
+
       i++;
-    }
-    return out;
-  }
 
-  function toM3U8(list){
-    const lines = ["#EXTM3U"];
-    for(const e of list){
-      const attrs = e.attrs || {};
-      const dur = (e.dur ?? "-1").toString().trim() || "-1";
-      let attrStr = "";
-      for(const k of Object.keys(attrs)){
-        const val = attrs[k];
-        if(val === undefined || val === null || val === "") continue;
-        attrStr += ` ${k}="${escapeAttr(val)}"`;
+      // пропускаем пустые строки
+      while(i < lines.length && !(lines[i] ?? "").trim()) i++;
+
+      // если следующая строка — EXTGRP, забираем группу и идём дальше
+      if(i < lines.length){
+        const maybeGrp = (lines[i] ?? "").trim();
+        if(maybeGrp.startsWith("#EXTGRP")){
+          const grp = maybeGrp.split(":").slice(1).join(":").trim();
+          if(grp) attrs["group-title"] = grp;
+          i++;
+          while(i < lines.length && !(lines[i] ?? "").trim()) i++;
+        }
       }
-      const name = (e.name ?? "").toString().trim();
-      lines.push(`#EXTINF:${dur}${attrStr},${name}`);
-      lines.push((e.url ?? "").toString().trim());
+
+      // пропускаем служебные #... строки между EXTINF и URL
+      while(i < lines.length){
+        const maybe = (lines[i] ?? "").trim();
+        if(!maybe){ i++; continue; }
+        if(maybe.startsWith("#") && isSkippableMetaBetween(maybe)) { i++; continue; }
+        break;
+      }
+
+      const urlLine = i < lines.length ? (lines[i] ?? "").trim() : "";
+      const url = (urlLine && !urlLine.startsWith("#")) ? urlLine : "";
+
+      out.push({ id: uid(), name, url, dur, attrs });
+      i++;
+      continue;
     }
-    return lines.join("\n") + "\n";
+
+    // голая ссылка без EXTINF (оставляем как есть)
+    if(!line.startsWith("#")){
+      out.push({ id: uid(), name: line, url: line, dur:"-1", attrs:{} });
+      i++;
+      continue;
+    }
+
+    // прочие #... строки пропускаем
+    i++;
   }
 
+  return out;
+}
+  function toM3U8(list){
+  const lines = ["#EXTM3U"];
+
+  for(const e of list){
+    const url = (e.url ?? "").toString().trim();
+
+    // КРИТИЧНО: не сохраняем битые записи без ссылки
+    if(!url || url.startsWith("#")) continue;
+
+    const attrs = e.attrs || {};
+    const dur = "-1"; // стандарт для IPTV/OTT
+
+    let attrStr = "";
+    for(const k of Object.keys(attrs)){
+      const val = attrs[k];
+      if(val === undefined || val === null || val === "") continue;
+      attrStr += ` ${k}="${escapeAttr(val)}"`;
+    }
+
+    const name = (e.name ?? "").toString().trim();
+    lines.push(`#EXTINF:${dur}${attrStr},${name}`);
+    lines.push(url);
+  }
+
+  return lines.join("\n") + "\n";
+}
   function downloadText(filename, text){
     const blob = new Blob([text], {type:"application/x-mpegURL;charset=utf-8"});
     const url = URL.createObjectURL(blob);
